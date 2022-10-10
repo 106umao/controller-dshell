@@ -1,0 +1,27 @@
+# permissions for end users to view dshells.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: dshell-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: controller-dshell
+    app.kubernetes.io/part-of: controller-dshell
+    app.kubernetes.io/managed-by: kustomize
+  name: dshell-viewer-role
+rules:
+- apiGroups:
+  - dshell.smartx.com
+  resources:
+  - dshells
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dshell.smartx.com
+  resources:
+  - dshells/status
+  verbs:
+  - get
