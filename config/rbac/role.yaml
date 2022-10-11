@@ -1,0 +1,33 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- apiGroups:
+  - dshell.smartx.com
+  resources:
+  - dshells
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - dshell.smartx.com
+  resources:
+  - dshells/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - dshell.smartx.com
+  resources:
+  - dshells/status
+  verbs:
+  - get
+  - patch
+  - update
