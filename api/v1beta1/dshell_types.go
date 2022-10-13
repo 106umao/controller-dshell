@@ -28,8 +28,11 @@ type DShellSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Command client update this field to distribute shell command event.
+	// Command 客户端设置 .spec.command 的值向 k8s 集群上的 controller 下发 shell 命令
 	Command string `json:"command,omitempty"`
+
+	// Timeout 命令执行的超时时间，为设值时为 0
+	Timeout int64 `json:"timeout,omitempty"`
 }
 
 // DShellStatus defines the observed state of DShell
@@ -37,25 +40,31 @@ type DShellStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Command to execute in local env.
+	// Command 当前 CR 执行的 shell 命令
 	Command string `json:"command,omitempty"`
 
-	// NodesResults is distribution shell execution result histories.
+	// NodesResults 集群中所有的 controller pod 执行 shell 命令的结果列表
 	NodesResults []ExecResult `json:"nodesResults,omitempty"`
 }
 
 type ExecResult struct {
-	// ControllerPodIp
-	ControllerPodIp string `json:"controllerPodIp,omitempty"`
+	// PodName controller 的宿主 pod 名称
+	PodName string `json:"podName,omitempty"`
 
-	// StartTime command execution time.
+	// podIp controller 的宿主 pod IP
+	PodIp string `json:"podIp,omitempty"`
+
+	// StartTime 命令执行的开始时间
 	StartTime metav1.Time `json:"StartTime,omitempty"`
 
-	// EndTime command execution time.
+	// EndTime 命令执行的结束时间
 	EndTime metav1.Time `json:"EndTime,omitempty"`
 
-	// Message is shell execution result of current nodes.
-	Message string `json:"message,omitempty"`
+	// Stdout shell 命令执行的标准输出流内容
+	Stdout string `json:"stdout,omitempty"`
+
+	// Stderr shell 命令执行的标准错误流内容
+	Stderr string `json:"stderr,omitempty"`
 }
 
 //+kubebuilder:object:root=true

@@ -17,9 +17,16 @@ limitations under the License.
 package controllers
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"os/exec"
+	"sync"
+	"time"
 
+	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,9 +39,13 @@ import (
 // DShellReconciler reconciles a DShell object
 type DShellReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	Generation int64
+	Scheme *runtime.Scheme
+	log    logr.Logger
 }
+
+const (
+	ShellPath = "/bin/bash"
+)
 
 //+kubebuilder:rbac:groups=dshell.smartx.com,resources=dshells,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=dshell.smartx.com,resources=dshells/status,verbs=get;update;patch
@@ -50,78 +61,191 @@ type DShellReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *DShellReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info(fmt.Sprintf("current reconcile request is %v", req))
+	r.log = log.FromContext(ctx)
+	r.log.Info(fmt.Sprintf("current reconcile request is %v", req))
 
 	var ds dshellv1beta1.DShell
 	if err := r.Get(ctx, req.NamespacedName, &ds); err != nil {
-		logger.Info(fmt.Sprintf("%v unable to fetch DShell or it have been delted.", req))
+		r.log.Info(fmt.Sprintf("%v unable to fetch DShell or it have been delted.", req))
 		return ctrl.Result{Requeue: true}, client.IgnoreNotFound(err)
 	}
 
 	// have already executed.
-	if isAlreadyExecuted(getPodIp(), ds.Status.NodesResults) {
+	if r.isAlreadyExecuted(ds.Status.NodesResults) {
 		return ctrl.Result{Requeue: true}, nil
 	}
+
 	var (
 		cmd       = ds.Spec.Command
-		msg       string
 		startTime v1.Time
 		endTime   v1.Time
+		// 命令执行超时时间，通过控制读取标准输出流和标准错误流的时间实现
+		timeout = ds.Spec.Timeout
 	)
 
-	if cmd == "" {
-		msg = "command is blank."
-	}
+	ctx, cancel := context.WithCancel(ctx)
+	go func(cancelFunc context.CancelFunc) {
+		// 处理如 ping 这类命令的超时情况，timeout 值由 CR的 .spec.timeout 设置
+		time.Sleep(time.Millisecond * time.Duration(timeout))
+		cancelFunc()
+	}(cancel)
 
 	startTime = v1.Now()
-	msg, err := r.executeCommand(ctx, cmd)
+	stdout, stderr := r.executeCommand(ctx, cmd)
+	r.log.Info(fmt.Sprintf("the execution stdout %v, stderr %v", stdout, stderr))
 	endTime = v1.Now()
-	if err != nil {
-		return ctrl.Result{}, err
-	}
 
+	// 切片 NodesResult 第一次被设值时为 nil，需要初始化
 	if ds.Status.NodesResults == nil {
 		ds.Status.NodesResults = make([]dshellv1beta1.ExecResult, 0)
 	}
 
 	ds.Status.NodesResults = append(ds.Status.NodesResults, dshellv1beta1.ExecResult{
-		ControllerPodIp: getPodIp(),
-		StartTime:       startTime,
-		EndTime:         endTime,
-		Message:         msg,
+		PodName:   r.getPodName(),
+		PodIp:     r.getPodIp(),
+		StartTime: startTime,
+		EndTime:   endTime,
+		Stdout:    stdout,
+		Stderr:    stderr,
 	})
 
 	if err := r.Status().Update(context.Background(), &ds); err != nil {
-		logger.Info(fmt.Sprintf("pod %v race lock failed.", getPodIp()))
+		if !errors.IsConflict(err) {
+			r.log.Info(fmt.Sprintf("resource %v status update failed", req))
+			return ctrl.Result{}, err
+		}
+
+		// 采用乐观机制，update 时采用 cas 的方式对 api-server 进行更行，更行失败时返回 Requeue=true
+		// 此时不重新入队时因为 old 版本被更新时会出发新的 update 事件
+		r.log.Info(fmt.Sprintf("pod %v %v race lock failed.", r.getPodName(), r.getPodIp()))
 	}
 
 	return ctrl.Result{Requeue: true}, nil
 }
 
 // executeCommand 在 controller pod 中执行 shell 命令
-func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string) (msg string, rerr error) {
-	// todo execute
-	return ",mock msg", nil
+func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string) (stdout, stderr string) {
+	if cmd == "" {
+		stderr = "dshell controller: command is blank."
+	}
+
+	r.log.Info(fmt.Sprintf("to execute the command %v", cmd))
+	c := exec.CommandContext(ctx, ShellPath, "-c", cmd)
+	outPipe, err := c.StdoutPipe()
+	if err != nil {
+		stdout = err.Error()
+		return
+	}
+
+	errPipe, err := c.StderrPipe()
+	if err != nil {
+		stderr = err.Error()
+		return
+	}
+
+	var (
+		stdoRd    = bufio.NewReader(outPipe)
+		stdeRd    = bufio.NewReader(errPipe)
+		stdoSlice = make([]byte, 0)
+		stdeSlice = make([]byte, 0)
+		wg        = sync.WaitGroup{}
+	)
+	wg.Add(2)
+
+	// 处理标准输出流
+	go func() {
+		// 标准输出流处理完毕
+		defer wg.Done()
+
+		for {
+			select {
+			case <-ctx.Done():
+				if ctx.Err() != nil {
+					stdoSlice = append(stdoSlice, []byte(fmt.Sprintf("timeout cancled: %q", ctx.Err()))...)
+				} else {
+					stdoSlice = append(stdoSlice, []byte("interupted")...)
+				}
+				return
+			default:
+				s, err := stdoRd.ReadSlice('\n')
+				if err != nil || err == io.EOF {
+					return
+				}
+				stdoSlice = append(stdoSlice, s...)
+			}
+		}
+	}()
+
+	// 处理标准错误流
+	go func() {
+		// 标准错误流处理完毕
+		defer wg.Done()
+
+		for {
+			select {
+			case <-ctx.Done():
+				if ctx.Err() != nil {
+					stdeSlice = append(stdeSlice, []byte(fmt.Sprintf("timeout cancled: %q", ctx.Err()))...)
+				} else {
+					stdeSlice = append(stdeSlice, []byte("interupted")...)
+				}
+				return
+			default:
+				stderrSlice, err := stdeRd.ReadSlice('\n')
+				if err != nil || err == io.EOF {
+					break
+				}
+				stdeSlice = append(stdeSlice, stderrSlice...)
+			}
+		}
+	}()
+
+	if err = c.Start(); err != nil {
+		stderr = err.Error()
+		return
+	}
+
+	// 阻塞等待标准输入流和标准错误流都处理完
+	wg.Wait()
+
+	return string(stdoSlice), string(stdeSlice)
 }
 
-func isAlreadyExecuted(podIp string, resulsts []dshellv1beta1.ExecResult) bool {
+// isAlreadyExecuted 判断当前 reconciler 是否执行过，取决于 CR 中 status 列表是否有 pod ip 和 pod name 相同的元素
+func (r *DShellReconciler) isAlreadyExecuted(resulsts []dshellv1beta1.ExecResult) bool {
+	// 列表为空表示第一次执行
 	if resulsts == nil {
 		return false
 	}
 
-	for _, r := range resulsts {
-		if r.ControllerPodIp == podIp {
+	for _, result := range resulsts {
+		if result.PodIp == r.getPodIp() && result.PodName == r.getPodName() {
 			return true
 		}
 	}
 	return false
 }
 
-// getPodIp 获取当前 pod 在 k8s 中分配到的 ip
-func getPodIp() string {
-	// todo get ip
-	return "mock ip"
+// getPodIp 获取当前 pod 在 k8s 集群中 CIDR 分配到的 IP
+func (r *DShellReconciler) getPodIp() string {
+	op, err := exec.Command(ShellPath, "-c", "hostname -i").CombinedOutput()
+	if err != nil {
+		r.log.Info("pod ip not found")
+		return "pod ip not found"
+	}
+	r.log.Info(fmt.Sprintf("pod ip is %v", string(op)))
+	return string(op)
+}
+
+// getPodIp 获取当前 pod 在 k8s 集群中分配到的名称
+func (r *DShellReconciler) getPodName() string {
+	op, err := exec.Command(ShellPath, "-c", "hostname").CombinedOutput()
+	if err != nil {
+		r.log.Info("pod name not found")
+		return "pod name not found"
+	}
+	r.log.Info(fmt.Sprintf("pod ip is %v", string(op)))
+	return string(op)
 }
 
 // SetupWithManager sets up the controller with the Manager.
