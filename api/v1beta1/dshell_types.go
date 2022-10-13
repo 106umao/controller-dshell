@@ -17,7 +17,6 @@ limitations under the License.
 package v1beta1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -38,27 +37,22 @@ type DShellStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// LastCommand is executed last time.
-	LastCommand string `json:"lastCommand,omitempty"`
+	// Command to execute in local env.
+	Command string `json:"command,omitempty"`
 
-	// ExecuteHistories is distribution shell execution result histories.
-	ExecuteHistories []ExecResult `json:"executeHistories,omitempty"`
+	// NodesResults is distribution shell execution result histories.
+	NodesResults []ExecResult `json:"nodesResults,omitempty"`
 }
 
 type ExecResult struct {
-	// Command shell command from CR event.
-	Command string `json:"command,omitempty"`
+	// ControllerPodIp
+	ControllerPodIp string `json:"controllerPodIp,omitempty"`
 
-	// ExecuteTime command execution time.
-	ExecuteTime metav1.Time `json:"executeTime,omitempty"`
+	// StartTime command execution time.
+	StartTime metav1.Time `json:"StartTime,omitempty"`
 
-	// NodeExecResults command relation to result is 1 to N.
-	NodeExecResults []NodeResult `json:"nodeExecResults,omitempty"`
-}
-
-type NodeResult struct {
-	// Addresses is nodes ip info of k8s cluster.
-	Addresses []corev1.NodeAddress `json:"addresses,omitempty"`
+	// EndTime command execution time.
+	EndTime metav1.Time `json:"EndTime,omitempty"`
 
 	// Message is shell execution result of current nodes.
 	Message string `json:"message,omitempty"`

@@ -43,52 +43,29 @@ spec:
           status:
             description: DShellStatus defines the observed state of DShell
             properties:
-              executeHistories:
-                description: ExecuteHistories is distribution shell execution result
-                  histories.
+              command:
+                description: Command to execute in local env.
+                type: string
+              nodesResults:
+                description: NodesResults is distribution shell execution result histories.
                 items:
                   properties:
-                    command:
-                      description: Command shell command from CR event.
-                      type: string
-                    executeTime:
-                      description: ExecuteTime command execution time.
+                    EndTime:
+                      description: EndTime command execution time.
                       format: date-time
                       type: string
-                    nodeExecResults:
-                      description: NodeExecResults command relation to result is 1
-                        to N.
-                      items:
-                        properties:
-                          addresses:
-                            description: Addresses is nodes ip info of k8s cluster.
-                            items:
-                              description: NodeAddress contains information for the
-                                node's address.
-                              properties:
-                                address:
-                                  description: The node address.
-                                  type: string
-                                type:
-                                  description: Node address type, one of Hostname,
-                                    ExternalIP or InternalIP.
-                                  type: string
-                              required:
-                              - address
-                              - type
-                              type: object
-                            type: array
-                          message:
-                            description: Message is shell execution result of current
-                              nodes.
-                            type: string
-                        type: object
-                      type: array
+                    StartTime:
+                      description: StartTime command execution time.
+                      format: date-time
+                      type: string
+                    controllerPodIp:
+                      description: ControllerPodIp
+                      type: string
+                    message:
+                      description: Message is shell execution result of current nodes.
+                      type: string
                   type: object
                 type: array
-              lastCommand:
-                description: LastCommand is executed last time.
-                type: string
             type: object
         type: object
     served: true
