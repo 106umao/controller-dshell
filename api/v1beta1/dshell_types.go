@@ -55,10 +55,10 @@ type ExecResult struct {
 	PodIp string `json:"podIp,omitempty"`
 
 	// StartTime 命令执行的开始时间
-	StartTime metav1.Time `json:"StartTime,omitempty"`
+	StartTime metav1.Time `json:"startTime,omitempty"`
 
 	// EndTime 命令执行的结束时间
-	EndTime metav1.Time `json:"EndTime,omitempty"`
+	EndTime metav1.Time `json:"endTime,omitempty"`
 
 	// Stdout shell 命令执行的标准输出流内容
 	Stdout string `json:"stdout,omitempty"`

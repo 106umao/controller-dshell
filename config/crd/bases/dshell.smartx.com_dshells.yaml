@@ -36,33 +36,43 @@ spec:
             description: DShellSpec defines the desired state of DShell
             properties:
               command:
-                description: Command client update this field to distribute shell
-                  command event.
+                description: Command 客户端设置 .spec.command 的值向 k8s 集群上的 controller 下发
+                  shell 命令
                 type: string
+              timeout:
+                description: Timeout 命令执行的超时时间，为设值时为 0
+                format: int64
+                type: integer
             type: object
           status:
             description: DShellStatus defines the observed state of DShell
             properties:
               command:
-                description: Command to execute in local env.
+                description: Command 当前 CR 执行的 shell 命令
                 type: string
               nodesResults:
-                description: NodesResults is distribution shell execution result histories.
+                description: NodesResults 集群中所有的 controller pod 执行 shell 命令的结果列表
                 items:
                   properties:
-                    EndTime:
-                      description: EndTime command execution time.
+                    endTime:
+                      description: EndTime 命令执行的结束时间
                       format: date-time
                       type: string
-                    StartTime:
-                      description: StartTime command execution time.
+                    podIp:
+                      description: podIp controller 的宿主 pod IP
+                      type: string
+                    podName:
+                      description: PodName controller 的宿主 pod 名称
+                      type: string
+                    startTime:
+                      description: StartTime 命令执行的开始时间
                       format: date-time
                       type: string
-                    controllerPodIp:
-                      description: ControllerPodIp
+                    stderr:
+                      description: Stderr shell 命令执行的标准错误流内容
                       type: string
-                    message:
-                      description: Message is shell execution result of current nodes.
+                    stdout:
+                      description: Stdout shell 命令执行的标准输出流内容
                       type: string
                   type: object
                 type: array

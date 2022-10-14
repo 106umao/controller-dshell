@@ -131,6 +131,7 @@ func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string) (stdo
 
 	r.log.Info(fmt.Sprintf("to execute the command %v", cmd))
 	c := exec.CommandContext(ctx, ShellPath, "-c", cmd)
+
 	outPipe, err := c.StdoutPipe()
 	if err != nil {
 		stdout = err.Error()
@@ -144,61 +145,16 @@ func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string) (stdo
 	}
 
 	var (
-		stdoRd    = bufio.NewReader(outPipe)
-		stdeRd    = bufio.NewReader(errPipe)
-		stdoSlice = make([]byte, 0)
-		stdeSlice = make([]byte, 0)
-		wg        = sync.WaitGroup{}
+		stdoutRd = bufio.NewReader(outPipe)
+		stderrRd = bufio.NewReader(errPipe)
+		wg       = sync.WaitGroup{}
 	)
 	wg.Add(2)
 
 	// 处理标准输出流
-	go func() {
-		// 标准输出流处理完毕
-		defer wg.Done()
-
-		for {
-			select {
-			case <-ctx.Done():
-				if ctx.Err() != nil {
-					stdoSlice = append(stdoSlice, []byte(fmt.Sprintf("timeout cancled: %q", ctx.Err()))...)
-				} else {
-					stdoSlice = append(stdoSlice, []byte("interupted")...)
-				}
-				return
-			default:
-				s, err := stdoRd.ReadSlice('\n')
-				if err != nil || err == io.EOF {
-					return
-				}
-				stdoSlice = append(stdoSlice, s...)
-			}
-		}
-	}()
-
+	go r.readWithCancel(ctx, &wg, stdoutRd, &stdout)
 	// 处理标准错误流
-	go func() {
-		// 标准错误流处理完毕
-		defer wg.Done()
-
-		for {
-			select {
-			case <-ctx.Done():
-				if ctx.Err() != nil {
-					stdeSlice = append(stdeSlice, []byte(fmt.Sprintf("timeout cancled: %q", ctx.Err()))...)
-				} else {
-					stdeSlice = append(stdeSlice, []byte("interupted")...)
-				}
-				return
-			default:
-				stderrSlice, err := stdeRd.ReadSlice('\n')
-				if err != nil || err == io.EOF {
-					break
-				}
-				stdeSlice = append(stdeSlice, stderrSlice...)
-			}
-		}
-	}()
+	go r.readWithCancel(ctx, &wg, stderrRd, &stderr)
 
 	if err = c.Start(); err != nil {
 		stderr = err.Error()
@@ -207,8 +163,7 @@ func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string) (stdo
 
 	// 阻塞等待标准输入流和标准错误流都处理完
 	wg.Wait()
-
-	return string(stdoSlice), string(stdeSlice)
+	return
 }
 
 // isAlreadyExecuted 判断当前 reconciler 是否执行过，取决于 CR 中 status 列表是否有 pod ip 和 pod name 相同的元素
@@ -228,24 +183,64 @@ func (r *DShellReconciler) isAlreadyExecuted(resulsts []dshellv1beta1.ExecResult
 
 // getPodIp 获取当前 pod 在 k8s 集群中 CIDR 分配到的 IP
 func (r *DShellReconciler) getPodIp() string {
-	op, err := exec.Command(ShellPath, "-c", "hostname -i").CombinedOutput()
-	if err != nil {
-		r.log.Info("pod ip not found")
-		return "pod ip not found"
-	}
-	r.log.Info(fmt.Sprintf("pod ip is %v", string(op)))
-	return string(op)
+	return r.cmdStdout("hostname -i")
 }
 
 // getPodIp 获取当前 pod 在 k8s 集群中分配到的名称
 func (r *DShellReconciler) getPodName() string {
-	op, err := exec.Command(ShellPath, "-c", "hostname").CombinedOutput()
+	return r.cmdStdout("hostname")
+}
+
+func (r *DShellReconciler) cmdStdout(cmd string) string {
+	op, err := exec.Command(ShellPath, "-c", cmd).CombinedOutput()
 	if err != nil {
-		r.log.Info("pod name not found")
-		return "pod name not found"
+		rsTips := fmt.Sprintf("%v not found", cmd)
+		r.log.Info(rsTips)
+		return rsTips
 	}
-	r.log.Info(fmt.Sprintf("pod ip is %v", string(op)))
-	return string(op)
+	r.log.Info(fmt.Sprintf("%v's stdout is %v", cmd, string(op)))
+	return string(purify(op))
+}
+
+func (r *DShellReconciler) readWithCancel(ctx context.Context, wg *sync.WaitGroup, read *bufio.Reader, res *string) {
+	// 标准错误流处理完毕
+	s := make([]byte, 0)
+	defer func() {
+		*res = string(purify(s))
+		r.log.Info(fmt.Sprintf("read result: %v", *res))
+		wg.Done()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			if ctx.Err() != nil {
+				s = append(s, []byte(fmt.Sprintf("timeout cancled: %q", ctx.Err()))...)
+			} else {
+				s = append(s, []byte("interrupted")...)
+			}
+			return
+		default:
+			rs, err := read.ReadSlice('\n')
+			if err != nil || err == io.EOF {
+				return
+			}
+			s = append(s, rs...)
+		}
+	}
+}
+
+// purify 标准输出流和标准错往往会以一个换行符结束，在 kubectl describe 输出时会s影响阅读，在这里把它去掉
+func purify(in []byte) (out []byte) {
+	if in == nil {
+		return nil
+	}
+
+	if l := len(in); l > 0 && in[l-1] == '\n' {
+		return in[:l-1]
+	}
+
+	return in
 }
 
 // SetupWithManager sets up the controller with the Manager.

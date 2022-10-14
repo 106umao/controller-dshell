@@ -10,4 +10,4 @@ metadata:
   name: dshell-ls-la
 spec:
   command: ls -la
-  timeout: 5000
+  timeout: 6000
