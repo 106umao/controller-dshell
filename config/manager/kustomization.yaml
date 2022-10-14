@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: 106umao/dshell
-  newTag: v4
+  newTag: v5

@@ -1,11 +1,17 @@
 # controller-dshell
-// TODO(user): Add simple overview of use/purpose
-
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A distributed command executor based on kubebuilder, in the k8s cluster, the command is issued through the CR, and the controller executes the command locally after receiving the command, and appends the result to the Status of the CR.
+
+## Design Diagram
+
+### Sequence Diagram
+
+### Flow Diagram
+
+## Function Todo List
 
 ## Getting Started
-You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
+
 **Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `kubectl cluster-info` shows).
 
 ### Running on the cluster
@@ -40,9 +46,6 @@ UnDeploy the controller to the cluster:
 ```sh
 make undeploy
 ```
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
 
 ### How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
