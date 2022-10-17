@@ -44,7 +44,9 @@ type DShellReconciler struct {
 }
 
 const (
-	ShellPath = "/bin/bash"
+	ShellPath     = "/bin/bash"
+	UnKnowPodName = "UnKnowPodName"
+	UnKnowPodIp   = "UnKnowPodIp"
 )
 
 //+kubebuilder:rbac:groups=dshell.smartx.com,resources=dshells,verbs=get;list;watch;create;update;patch;delete
@@ -64,45 +66,56 @@ func (r *DShellReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	r.log = log.FromContext(ctx)
 	r.log.Info(fmt.Sprintf("current reconcile request is %v", req))
 
-	var ds dshellv1beta1.DShell
+	var (
+		ds dshellv1beta1.DShell
+		pn string
+		pi string
+	)
 	if err := r.Get(ctx, req.NamespacedName, &ds); err != nil {
-		r.log.Info(fmt.Sprintf("%v unable to fetch DShell or it have been delted.", req))
+		r.log.Info(fmt.Sprintf("%v unable to fetch DShell or it have been deleted.", req))
 		return ctrl.Result{Requeue: true}, client.IgnoreNotFound(err)
 	}
 
-	// have already executed.
-	if r.isAlreadyExecuted(ds.Status.NodesResults) {
+	pn, err := r.getPodName()
+	if err != nil {
+		pn = UnKnowPodName
+		r.log.Error(err, "key pod name error")
+	}
+
+	pi, err = r.getPodIp()
+	if err != nil {
+		pi = UnKnowPodIp
+		r.log.Error(err, "key pod ip error")
+	}
+
+	// 当前 pod 已经执行过 CR Shell 命令
+	if r.isAlreadyExecuted(ds.Status.NodesResults, pn, pi) {
 		return ctrl.Result{Requeue: true}, nil
 	}
 
 	var (
-		cmd       = ds.Spec.Command
+		stdout    string
+		stderr    string
 		startTime v1.Time
 		endTime   v1.Time
-		// 命令执行超时时间，通过控制读取标准输出流和标准错误流的时间实现
-		timeout = ds.Spec.Timeout
 	)
+	if pn == UnKnowPodName || pi == UnKnowPodIp {
+		stderr = "there are not pod keys in some pods, please check pod log for detail."
+	} else {
+		startTime = v1.Now()
+		stdout, stderr = r.executeCommand(ctx, ds.Spec.Command, ds.Spec.Timeout)
+		r.log.Info(fmt.Sprintf("the execution stdout %v, stderr %v", stdout, stderr))
+		endTime = v1.Now()
+	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	go func(cancelFunc context.CancelFunc) {
-		// 处理如 ping 这类命令的超时情况，timeout 值由 CR的 .spec.timeout 设置
-		time.Sleep(time.Millisecond * time.Duration(timeout))
-		cancelFunc()
-	}(cancel)
-
-	startTime = v1.Now()
-	stdout, stderr := r.executeCommand(ctx, cmd)
-	r.log.Info(fmt.Sprintf("the execution stdout %v, stderr %v", stdout, stderr))
-	endTime = v1.Now()
-
-	// 切片 NodesResult 第一次被设值时为 nil，需要初始化
+	// 第一个处理 CR 的 pod 达到时 NodesResult 为 nil，需要初始化
 	if ds.Status.NodesResults == nil {
 		ds.Status.NodesResults = make([]dshellv1beta1.ExecResult, 0)
 	}
 
 	ds.Status.NodesResults = append(ds.Status.NodesResults, dshellv1beta1.ExecResult{
-		PodName:   r.getPodName(),
-		PodIp:     r.getPodIp(),
+		PodName:   pn,
+		PodIp:     pi,
 		StartTime: startTime,
 		EndTime:   endTime,
 		Stdout:    stdout,
@@ -115,18 +128,18 @@ func (r *DShellReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, err
 		}
 
-		// 采用乐观机制，update 时采用 cas 的方式对 api-server 进行更行，更行失败时返回 Requeue=true
-		// 此时不重新入队时因为 old 版本被更新时会出发新的 update 事件
-		r.log.Info(fmt.Sprintf("pod %v %v race lock failed.", r.getPodName(), r.getPodIp()))
+		r.log.Info(fmt.Sprintf("pod %v %v race lock failed.", pn, pi))
 	}
 
+	// 采用 k8s api server 的乐观机制实现并发
+	// 因为 old 版本被更新时会出发新的 update 事件，所以在此不重新入队时
 	return ctrl.Result{Requeue: true}, nil
 }
 
 // executeCommand 在 controller pod 中执行 shell 命令
-func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string) (stdout, stderr string) {
+func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string, timeout int64) (stdout, stderr string) {
 	if cmd == "" {
-		stderr = "dshell controller: command is blank."
+		stderr = "dshell: command is blank."
 	}
 
 	r.log.Info(fmt.Sprintf("to execute the command %v", cmd))
@@ -144,17 +157,21 @@ func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string) (stdo
 		return
 	}
 
-	var (
-		stdoutRd = bufio.NewReader(outPipe)
-		stderrRd = bufio.NewReader(errPipe)
-		wg       = sync.WaitGroup{}
-	)
+	wg := sync.WaitGroup{}
 	wg.Add(2)
 
+	ctx, cancel := context.WithCancel(ctx)
+	go func(cancelFunc context.CancelFunc) {
+		// 命令执行超时时间，通过控制读取标准输出流和标准错误流的时间实现
+		// 处理如 ping 这类命令的超时情况，timeout 值由 CR的 .spec.timeout 设置
+		time.Sleep(time.Millisecond * time.Duration(timeout))
+		cancelFunc()
+	}(cancel)
+
 	// 处理标准输出流
-	go r.readWithCancel(ctx, &wg, stdoutRd, &stdout)
+	go r.readWithCancel(ctx, &wg, bufio.NewReader(outPipe), &stdout)
 	// 处理标准错误流
-	go r.readWithCancel(ctx, &wg, stderrRd, &stderr)
+	go r.readWithCancel(ctx, &wg, bufio.NewReader(errPipe), &stderr)
 
 	if err = c.Start(); err != nil {
 		stderr = err.Error()
@@ -166,15 +183,15 @@ func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string) (stdo
 	return
 }
 
-// isAlreadyExecuted 判断当前 reconciler 是否执行过，取决于 CR 中 status 列表是否有 pod ip 和 pod name 相同的元素
-func (r *DShellReconciler) isAlreadyExecuted(resulsts []dshellv1beta1.ExecResult) bool {
-	// 列表为空表示第一次执行
-	if resulsts == nil {
+// isAlreadyExecuted 判断当前 pod 是否执行过，取决于 CR 中 status 列表是否有 pod ip 和 pod name 相同的元素记录
+func (r *DShellReconciler) isAlreadyExecuted(results []dshellv1beta1.ExecResult, pn, pi string) bool {
+	// 列表为空表示 CR 第一次被处理
+	if results == nil {
 		return false
 	}
 
-	for _, result := range resulsts {
-		if result.PodIp == r.getPodIp() && result.PodName == r.getPodName() {
+	for _, result := range results {
+		if result.PodIp == pi && result.PodName == pn {
 			return true
 		}
 	}
@@ -182,28 +199,31 @@ func (r *DShellReconciler) isAlreadyExecuted(resulsts []dshellv1beta1.ExecResult
 }
 
 // getPodIp 获取当前 pod 在 k8s 集群中 CIDR 分配到的 IP
-func (r *DShellReconciler) getPodIp() string {
-	return r.cmdStdout("hostname -i")
+func (r *DShellReconciler) getPodIp() (string, error) {
+	return r.cmdOutput("hostname -i")
 }
 
 // getPodIp 获取当前 pod 在 k8s 集群中分配到的名称
-func (r *DShellReconciler) getPodName() string {
-	return r.cmdStdout("hostname")
+func (r *DShellReconciler) getPodName() (string, error) {
+	return r.cmdOutput("hostname")
 }
 
-func (r *DShellReconciler) cmdStdout(cmd string) string {
-	op, err := exec.Command(ShellPath, "-c", cmd).CombinedOutput()
-	if err != nil {
-		rsTips := fmt.Sprintf("%v not found", cmd)
-		r.log.Info(rsTips)
-		return rsTips
+func (r *DShellReconciler) cmdOutput(cmd string) (rs string, re error) {
+	op, re := exec.Command(ShellPath, "-c", cmd).CombinedOutput()
+	if re != nil {
+		return "", re
 	}
-	r.log.Info(fmt.Sprintf("%v's stdout is %v", cmd, string(op)))
-	return string(purify(op))
+
+	if rs = string(purify(op)); rs == "" {
+		return rs, fmt.Errorf("command result %v is empty", cmd)
+	}
+
+	r.log.Info(fmt.Sprintf("command %v's result is %v", cmd, rs))
+	return
 }
 
-func (r *DShellReconciler) readWithCancel(ctx context.Context, wg *sync.WaitGroup, read *bufio.Reader, res *string) {
-	// 标准错误流处理完毕
+func (r *DShellReconciler) readWithCancel(ctx context.Context, wg *sync.WaitGroup, rd *bufio.Reader, res *string) {
+	// 流处理完毕
 	s := make([]byte, 0)
 	defer func() {
 		*res = string(purify(s))
@@ -221,7 +241,7 @@ func (r *DShellReconciler) readWithCancel(ctx context.Context, wg *sync.WaitGrou
 			}
 			return
 		default:
-			rs, err := read.ReadSlice('\n')
+			rs, err := rd.ReadSlice('\n')
 			if err != nil || err == io.EOF {
 				return
 			}
@@ -230,7 +250,7 @@ func (r *DShellReconciler) readWithCancel(ctx context.Context, wg *sync.WaitGrou
 	}
 }
 
-// purify 标准输出流和标准错往往会以一个换行符结束，在 kubectl describe 输出时会s影响阅读，在这里把它去掉
+// purify 标准输出流和标准错往往会以一个换行符结束，在 kubectl describe 输出时会影响阅读，在这里把它去掉
 func purify(in []byte) (out []byte) {
 	if in == nil {
 		return nil

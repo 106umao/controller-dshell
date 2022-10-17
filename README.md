@@ -1,14 +1,8 @@
 # controller-dshell
+## Design Doc
+[Design Doc](https://www.yuque.com/juzimao-ayn5t/aie3hn/bcbwh2/edit#66cf02d0)
 ## Description
 A distributed command executor based on kubebuilder, in the k8s cluster, the command is issued through the CR, and the controller executes the command locally after receiving the command, and appends the result to the Status of the CR.
-
-## Design Diagram
-
-### Sequence Diagram
-
-### Flow Diagram
-
-## Function Todo List
 
 ## Getting Started
 
@@ -94,4 +88,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+
 
