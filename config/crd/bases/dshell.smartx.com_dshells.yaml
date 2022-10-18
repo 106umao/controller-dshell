@@ -43,6 +43,8 @@ spec:
                 description: Timeout 命令执行的超时时间，为设值时为 0
                 format: int64
                 type: integer
+            required:
+            - command
             type: object
           status:
             description: DShellStatus defines the observed state of DShell

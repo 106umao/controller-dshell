@@ -19,21 +19,19 @@ package controllers
 import (
 	"bufio"
 	"context"
+	dshellv1beta1 "dshell/api/v1beta1"
 	"fmt"
-	"io"
-	"os/exec"
-	"sync"
-	"time"
-
 	"github.com/go-logr/logr"
+	"io"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"os/exec"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	dshellv1beta1 "dshell/api/v1beta1"
+	"sync"
+	"time"
 )
 
 // DShellReconciler reconciles a DShell object
@@ -104,7 +102,7 @@ func (r *DShellReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	} else {
 		startTime = v1.Now()
 		stdout, stderr = r.executeCommand(ctx, ds.Spec.Command, ds.Spec.Timeout)
-		r.log.Info(fmt.Sprintf("the execution stdout %v, stderr %v", stdout, stderr))
+		r.log.Info(fmt.Sprintf("the command %v execution stdout %v, stderr %v", ds.Spec.Command, stdout, stderr))
 		endTime = v1.Now()
 	}
 
@@ -142,6 +140,13 @@ func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string, timeo
 		stderr = "dshell: command is blank."
 	}
 
+	// 命令执行超时时间，通过控制读取标准输出流和标准错误流的时间实现
+	// 处理如 ping 这类命令的超时情况，timeout 值由 CR的 .spec.timeout 设置
+	ctx, cancel := context.WithTimeout(ctx, time.Millisecond*time.Duration(timeout))
+	defer func() {
+		cancel()
+	}()
+
 	r.log.Info(fmt.Sprintf("to execute the command %v", cmd))
 	c := exec.CommandContext(ctx, ShellPath, "-c", cmd)
 
@@ -160,13 +165,12 @@ func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string, timeo
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
-	ctx, cancel := context.WithCancel(ctx)
-	go func(cancelFunc context.CancelFunc) {
-		// 命令执行超时时间，通过控制读取标准输出流和标准错误流的时间实现
-		// 处理如 ping 这类命令的超时情况，timeout 值由 CR的 .spec.timeout 设置
-		time.Sleep(time.Millisecond * time.Duration(timeout))
-		cancelFunc()
-	}(cancel)
+	//ctx, cancel := context.WithCancel(ctx)
+	//go func(cancelFunc context.CancelFunc) {
+	//
+	//	time.Sleep()
+	//	cancelFunc()
+	//}(cancel)
 
 	// 处理标准输出流
 	go r.readWithCancel(ctx, &wg, bufio.NewReader(outPipe), &stdout)

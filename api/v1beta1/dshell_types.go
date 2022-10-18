@@ -29,7 +29,7 @@ type DShellSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Command 客户端设置 .spec.command 的值向 k8s 集群上的 controller 下发 shell 命令
-	Command string `json:"command,omitempty"`
+	Command string `json:"command"`
 
 	// Timeout 命令执行的超时时间，为设值时为 0
 	Timeout int64 `json:"timeout,omitempty"`

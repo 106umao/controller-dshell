@@ -1,0 +1,13 @@
+apiVersion: dshell.smartx.com/v1beta1
+kind: DShell
+metadata:
+  labels:
+    app.kubernetes.io/name: dshell
+    app.kubernetes.io/instance: dshell-sample
+    app.kubernetes.io/part-of: controller-dshell
+    app.kuberentes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: controller-dshell
+  name: dshell-ping
+spec:
+  command: ping baidu.com
+  timeout: 6000
