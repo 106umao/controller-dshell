@@ -31,7 +31,8 @@ type DShellSpec struct {
 	// Command 客户端设置 .spec.command 的值向 k8s 集群上的 controller 下发 shell 命令
 	Command string `json:"command"`
 
-	// Timeout 命令执行的超时时间，为设值时为 0
+	// todo 具有单位的变量，把单位体现在变量名中
+	// Timeout shell 命令执行的超时时间，默认为 0，单位毫秒
 	Timeout int64 `json:"timeout,omitempty"`
 }
 

@@ -21,17 +21,18 @@ import (
 	"context"
 	dshellv1beta1 "dshell/api/v1beta1"
 	"fmt"
-	"github.com/go-logr/logr"
 	"io"
+	"os/exec"
+	"sync"
+	"time"
+
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"os/exec"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sync"
-	"time"
 )
 
 // DShellReconciler reconciles a DShell object
@@ -66,16 +67,21 @@ func (r *DShellReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	var (
 		ds dshellv1beta1.DShell
+		// todo 变量名见名知意，可以缩写不能太短，本来就很短的一般不用缩写
 		pn string
 		pi string
 	)
 	if err := r.Get(ctx, req.NamespacedName, &ds); err != nil {
+		// todo Info Error 日志分组输出等，了解库之后做最佳实践
+		// todo 明确预期之内的需求
 		r.log.Info(fmt.Sprintf("%v unable to fetch DShell or it have been deleted.", req))
 		return ctrl.Result{Requeue: true}, client.IgnoreNotFound(err)
 	}
 
 	pn, err := r.getPodName()
 	if err != nil {
+		// todo 一个变量不能出现两个含义
+		// todo 不能占用户合法的名称空间
 		pn = UnKnowPodName
 		r.log.Error(err, "key pod name error")
 	}
@@ -91,6 +97,7 @@ func (r *DShellReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// todo 当存在变量第一次出现的作用域比后续使用到的作用域小时，需要在较大的作用域下进行变量声明，而如果需要声明的变量较多，使用声明块更整洁
 	var (
 		stdout    string
 		stderr    string
@@ -98,14 +105,17 @@ func (r *DShellReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		endTime   v1.Time
 	)
 	if pn == UnKnowPodName || pi == UnKnowPodIp {
+		// todo 一个变量不能有两个含义
 		stderr = "there are not pod keys in some pods, please check pod log for detail."
 	} else {
 		startTime = v1.Now()
 		stdout, stderr = r.executeCommand(ctx, ds.Spec.Command, ds.Spec.Timeout)
-		r.log.Info(fmt.Sprintf("the command %v execution stdout %v, stderr %v", ds.Spec.Command, stdout, stderr))
 		endTime = v1.Now()
+		// todo 通常在命令执行前记录
+		r.log.Info(fmt.Sprintf("the command %v execution stdout %v, stderr %v", ds.Spec.Command, stdout, stderr))
 	}
 
+	// todo 注释用英文
 	// 第一个处理 CR 的 pod 达到时 NodesResult 为 nil，需要初始化
 	if ds.Status.NodesResults == nil {
 		ds.Status.NodesResults = make([]dshellv1beta1.ExecResult, 0)
@@ -137,6 +147,7 @@ func (r *DShellReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 // executeCommand 在 controller pod 中执行 shell 命令
 func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string, timeout int64) (stdout, stderr string) {
 	if cmd == "" {
+		// todo 同上，一个变量不能有两个语义
 		stderr = "dshell: command is blank."
 	}
 
@@ -165,13 +176,6 @@ func (r *DShellReconciler) executeCommand(ctx context.Context, cmd string, timeo
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
-	//ctx, cancel := context.WithCancel(ctx)
-	//go func(cancelFunc context.CancelFunc) {
-	//
-	//	time.Sleep()
-	//	cancelFunc()
-	//}(cancel)
-
 	// 处理标准输出流
 	go r.readWithCancel(ctx, &wg, bufio.NewReader(outPipe), &stdout)
 	// 处理标准错误流
@@ -195,6 +199,7 @@ func (r *DShellReconciler) isAlreadyExecuted(results []dshellv1beta1.ExecResult,
 	}
 
 	for _, result := range results {
+		// todo 不能依赖于可变的key做condition
 		if result.PodIp == pi && result.PodName == pn {
 			return true
 		}
