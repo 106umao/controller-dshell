@@ -4,6 +4,6 @@ import (
 	. "github.com/onsi/ginkgo"
 )
 
-var _ = Describe("Book", func() {
+var _ = Describe("DShell", func() {
 	// todo implement
 })
