@@ -28,11 +28,11 @@ type DShellSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Command 客户端设置 .spec.command 的值向 k8s 集群上的 controller 下发 shell 命令
+	// Command the http client sets the value of .spec.command to issue shell commands to the controller on the k8s cluster
 	Command string `json:"command"`
 
-	// Timeout 命令执行的超时时间，为设值时为 0
-	Timeout int64 `json:"timeout,omitempty"`
+	// TimeoutMs the timeout for shell command execution, its default is 0, in milliseconds
+	TimeoutMs int64 `json:"timeout,omitempty"`
 }
 
 // DShellStatus defines the observed state of DShell
@@ -40,31 +40,34 @@ type DShellStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Command 当前 CR 执行的 shell 命令
+	// Command shell command executed by the current CR
 	Command string `json:"command,omitempty"`
 
-	// NodesResults 集群中所有的 controller pod 执行 shell 命令的结果列表
+	// NodesResults list of results of shell commands executed by all controller pods in the cluster
 	NodesResults []ExecResult `json:"nodesResults,omitempty"`
 }
 
 type ExecResult struct {
-	// PodName controller 的宿主 pod 名称
+	// PodName the host pod name of the controller
 	PodName string `json:"podName,omitempty"`
 
-	// podIp controller 的宿主 pod IP
+	// podIp the host pod IP of the controller
 	PodIp string `json:"podIp,omitempty"`
 
-	// StartTime 命令执行的开始时间
+	// StartTime of command execution
 	StartTime metav1.Time `json:"startTime,omitempty"`
 
-	// EndTime 命令执行的结束时间
+	// EndTime of command execution
 	EndTime metav1.Time `json:"endTime,omitempty"`
 
-	// Stdout shell 命令执行的标准输出流内容
+	// Stdout the standard output stream of the execution shell
 	Stdout string `json:"stdout,omitempty"`
 
-	// Stderr shell 命令执行的标准错误流内容
+	// Stderr the standard error output stream of the execution shell
 	Stderr string `json:"stderr,omitempty"`
+
+	// CtrlErr error message of dshell controller
+	CtrlErr string `json:"ctrlErr,omitempty"`
 }
 
 //+kubebuilder:object:root=true
